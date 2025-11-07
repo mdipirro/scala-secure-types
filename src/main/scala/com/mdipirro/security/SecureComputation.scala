@@ -1,30 +1,106 @@
 package com.mdipirro.security
 
+import com.mdipirro.security.WithPropagation.SecureComputation
 
-trait MustBePure[M]
+object WithPurity:
 
-case class Pure()
+  trait MustBePure[M]
 
-case class Tainted()
+  case class Pure()
 
-given MustBePure[Pure] with {}
+  case class Tainted()
 
-/**
- * Secure computation wrapper
- */
-case class SecureComputation[M, +A] private(value: A):
+  given MustBePure[Pure] with {}
 
-  def open(using MustBePure[M]): A = value
+  /**
+   * Secure computation wrapper
+   */
+  case class SecureComputation[M, +A] private(value: A):
 
-  def map[M2, B](f: A => B)(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] = SecureComputation(f(value))
+    def open(using MustBePure[M]): A = value
 
-  def flatMap[M2, B](f: A => SecureComputation[M2, B])(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] =
-    f(value)
+    def map[M2, B](f: A => B)(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] = SecureComputation(f(value))
 
-  def sapp[M2, B](f: SecureComputation[M2, A => B])(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] =
-    map(f.value)
+    def flatMap[M2, B](f: A => SecureComputation[M2, B])(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] =
+      f(value)
 
-  def foreach(f: A => Unit)(using MustBePure[M]): Unit = f(value)
+    def sapp[M2, B](f: SecureComputation[M2, A => B])(using MustBePure[M], MustBePure[M2]): SecureComputation[M2, B] =
+      map(f.value)
 
-private object SecureComputation:
-  def apply[M, A](a: A): SecureComputation[M, A] = new SecureComputation(a)
+    def foreach(f: A => Unit)(using MustBePure[M]): Unit = f(value)
+
+  private object SecureComputation:
+    def apply[M, A](a: A): SecureComputation[M, A] = new SecureComputation(a)
+
+object WithPropagation:
+  enum Purity:
+    case Pure, Tainted, Sanitised
+
+  // Typeclass to allow open only for Pure and Sanitised
+  trait CanOpen[P <: Purity]
+  object CanOpen:
+    given CanOpen[Purity.Pure.type] with {}
+    given CanOpen[Purity.Sanitised.type] with {}
+
+  trait TaintPropagation[P <: Purity, P1 <: Purity]:
+    type Result <: Purity
+
+  object TaintPropagation:
+    // TODO Is this possible with match types???
+    // Tainted dominates
+    given taintedLeft[P1 <: Purity]: TaintPropagation[Purity.Tainted.type, P1] with
+      type Result = Purity.Tainted.type
+    given taintedRight[P0 <: Purity]: TaintPropagation[P0, Purity.Tainted.type] with
+      type Result = Purity.Tainted.type
+
+    // Sanitised dominates over Pure (if neither is Tainted)
+    given sanitisedLeft[P1 <: Purity]: TaintPropagation[Purity.Sanitised.type, P1] with
+      type Result = Purity.Sanitised.type
+    given sanitisedRight[P0 <: Purity]: TaintPropagation[P0, Purity.Sanitised.type] with
+      type Result = Purity.Sanitised.type
+
+    // Pure + Pure = Pure
+    given pureAndPure: TaintPropagation[Purity.Pure.type, Purity.Pure.type] with
+      type Result = Purity.Pure.type
+
+
+  case class SecureComputation[P <: Purity, +A] private(value: A):
+    def open(using CanOpen[P]): A = value
+
+    def map[B](f: A => B): SecureComputation[P, B] = SecureComputation(f(value))
+
+    def flatMap[P1 <: Purity, B](f: A => SecureComputation[P1, B])(using tp: TaintPropagation[P, P1]): SecureComputation[tp.Result, B] =
+      val result = f(value)
+      SecureComputation(result.value)
+
+    def foreach(f: A => Unit): Unit = f(value)
+
+    /*def sanitise[B, E](s: A => Either[E, B]): Sanitised[B, E] =
+      val result = s(value)
+      result.map(SecureComputation.apply)*/
+    // TODO How would Either fit in??
+    def sanitise[B](s: A => B): SecureComputation[Purity.Sanitised.type, B] = SecureComputation(s(value))
+
+  object SecureComputation:
+    //type Sanitised[A, E] = Either[E, SecureComputation[Purity.Sanitised.type, A]]
+
+    def apply[P <: Purity, A](a: A): SecureComputation[P, A] = new SecureComputation(a)
+
+@main def sanitise(): Unit =
+  val untrusted = "10"
+  val tainted = SecureComputation[WithPropagation.Purity.Tainted.type, String](untrusted)
+  val sanitised = tainted sanitise { str =>
+    //str.toIntOption.toRight(s"$str is not a number")
+    str.toInt
+  }
+
+  val safeIncrement = SecureComputation[WithPropagation.Purity.Pure.type, Int](5)
+  safeIncrement.flatMap(i => sanitised)
+
+  val result = for {
+    si <- safeIncrement
+    //t <- tainted
+    s <- sanitised
+  } yield s + si
+
+  println(s"Result: ${result.open}")

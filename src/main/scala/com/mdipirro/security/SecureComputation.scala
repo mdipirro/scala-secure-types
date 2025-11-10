@@ -37,7 +37,6 @@ object WithPropagation:
   enum Purity:
     case Pure, Tainted, Sanitised
 
-  // Typeclass to allow open only for Pure and Sanitised
   trait CanOpen[P <: Purity]
 
   object CanOpen:
@@ -53,7 +52,9 @@ object WithPropagation:
     case (Purity.Pure.type, Purity.Pure.type) => Purity.Pure.type
 
 
-  case class SecureComputation[P <: Purity, +A] private(value: A):
+  class SecureComputation[P <: Purity, +A] private(computeValue: () => A):
+    private lazy val value = computeValue()
+
     def open(using CanOpen[P]): A = value
 
     def map[B](f: A => B): SecureComputation[P, B] = SecureComputation(f(value))
@@ -71,7 +72,7 @@ object WithPropagation:
   object SecureComputation:
     type Sanitised[A, E] = Either[E, SecureComputation[Purity.Sanitised.type, A]]
 
-    def apply[P <: Purity, A](a: A): SecureComputation[P, A] = new SecureComputation(a)
+    def apply[P <: Purity, A](a: => A): SecureComputation[P, A] = new SecureComputation(() => a)
 
 @main def sanitise(): Unit =
   val untrusted = "10"

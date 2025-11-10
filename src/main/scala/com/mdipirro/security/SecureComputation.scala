@@ -42,26 +42,12 @@ object WithPropagation:
     given CanOpen[Purity.Pure.type] with {}
     given CanOpen[Purity.Sanitised.type] with {}
 
-  trait TaintPropagation[P <: Purity, P1 <: Purity]:
-    type Result <: Purity
-
-  object TaintPropagation:
-    // TODO Is this possible with match types???
-    // Tainted dominates
-    given taintedLeft[P1 <: Purity]: TaintPropagation[Purity.Tainted.type, P1] with
-      type Result = Purity.Tainted.type
-    given taintedRight[P0 <: Purity]: TaintPropagation[P0, Purity.Tainted.type] with
-      type Result = Purity.Tainted.type
-
-    // Sanitised dominates over Pure (if neither is Tainted)
-    given sanitisedLeft[P1 <: Purity]: TaintPropagation[Purity.Sanitised.type, P1] with
-      type Result = Purity.Sanitised.type
-    given sanitisedRight[P0 <: Purity]: TaintPropagation[P0, Purity.Sanitised.type] with
-      type Result = Purity.Sanitised.type
-
-    // Pure + Pure = Pure
-    given pureAndPure: TaintPropagation[Purity.Pure.type, Purity.Pure.type] with
-      type Result = Purity.Pure.type
+  type Propagate[P0 <: Purity, P1 <: Purity] <: Purity = (P0, P1) match
+    case (Purity.Tainted.type, _) => Purity.Tainted.type
+    case (_, Purity.Tainted.type) => Purity.Tainted.type
+    case (Purity.Sanitised.type, _) => Purity.Sanitised.type
+    case (_, Purity.Sanitised.type) => Purity.Sanitised.type
+    case (Purity.Pure.type, Purity.Pure.type) => Purity.Pure.type
 
 
   case class SecureComputation[P <: Purity, +A] private(value: A):
@@ -69,7 +55,7 @@ object WithPropagation:
 
     def map[B](f: A => B): SecureComputation[P, B] = SecureComputation(f(value))
 
-    def flatMap[P1 <: Purity, B](f: A => SecureComputation[P1, B])(using tp: TaintPropagation[P, P1]): SecureComputation[tp.Result, B] =
+    def flatMap[P1 <: Purity, B](f: A => SecureComputation[P1, B]): SecureComputation[Propagate[P, P1], B] =
       val result = f(value)
       SecureComputation(result.value)
 

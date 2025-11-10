@@ -1,6 +1,6 @@
 package com.mdipirro.security
 
-import com.mdipirro.security.WithPropagation.SecureComputation
+import com.mdipirro.security.WithPropagation.{Purity, SecureComputation}
 import com.mdipirro.security.WithPropagation.SecureComputation.Sanitised
 
 object WithPurity:
@@ -75,19 +75,20 @@ object WithPropagation:
     def apply[P <: Purity, A](a: => A): SecureComputation[P, A] = new SecureComputation(() => a)
 
 @main def sanitise(): Unit =
-  val untrusted = "10"
-  val tainted = SecureComputation[WithPropagation.Purity.Tainted.type, String](untrusted)
+  print("Enter a value: ")
+
+  val tainted = SecureComputation[Purity.Tainted.type, String](scala.io.StdIn.readLine())
   val sanitised = tainted sanitise { str =>
     str.toIntOption.toRight(s"$str is not a number")
   }
 
-  val safeIncrement = SecureComputation[WithPropagation.Purity.Pure.type, Int](5)
+  val safeIncrement = SecureComputation[Purity.Pure.type, Int](5)
 
   sanitised match
     case Left(error) => println(s"Sanitisation failed: $error")
     case Right(safeValue) =>
       val result = for {
-        v <- tainted
+        v <- safeValue
         i <- safeIncrement
       } yield v + i
       println(s"Sanitised computation result: ${result.open}")

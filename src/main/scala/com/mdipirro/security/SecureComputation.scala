@@ -1,6 +1,7 @@
 package com.mdipirro.security
 
 import com.mdipirro.security.WithPropagation.SecureComputation
+import com.mdipirro.security.WithPropagation.SecureComputation.Sanitised
 
 object WithPurity:
 
@@ -38,8 +39,10 @@ object WithPropagation:
 
   // Typeclass to allow open only for Pure and Sanitised
   trait CanOpen[P <: Purity]
+
   object CanOpen:
     given CanOpen[Purity.Pure.type] with {}
+
     given CanOpen[Purity.Sanitised.type] with {}
 
   type Propagate[P0 <: Purity, P1 <: Purity] <: Purity = (P0, P1) match
@@ -61,14 +64,12 @@ object WithPropagation:
 
     def foreach(f: A => Unit): Unit = f(value)
 
-    /*def sanitise[B, E](s: A => Either[E, B]): Sanitised[B, E] =
+    def sanitise[B, E](s: A => Either[E, B]): Sanitised[B, E] =
       val result = s(value)
-      result.map(SecureComputation.apply)*/
-    // TODO How would Either fit in??
-    def sanitise[B](s: A => B): SecureComputation[Purity.Sanitised.type, B] = SecureComputation(s(value))
+      result.map(SecureComputation.apply)
 
   object SecureComputation:
-    //type Sanitised[A, E] = Either[E, SecureComputation[Purity.Sanitised.type, A]]
+    type Sanitised[A, E] = Either[E, SecureComputation[Purity.Sanitised.type, A]]
 
     def apply[P <: Purity, A](a: A): SecureComputation[P, A] = new SecureComputation(a)
 
@@ -76,17 +77,16 @@ object WithPropagation:
   val untrusted = "10"
   val tainted = SecureComputation[WithPropagation.Purity.Tainted.type, String](untrusted)
   val sanitised = tainted sanitise { str =>
-    //str.toIntOption.toRight(s"$str is not a number")
-    str.toInt
+    str.toIntOption.toRight(s"$str is not a number")
   }
 
   val safeIncrement = SecureComputation[WithPropagation.Purity.Pure.type, Int](5)
-  safeIncrement.flatMap(i => sanitised)
 
-  val result = for {
-    si <- safeIncrement
-    //t <- tainted
-    s <- sanitised
-  } yield s + si
-
-  println(s"Result: ${result.open}")
+  sanitised match
+    case Left(error) => println(s"Sanitisation failed: $error")
+    case Right(safeValue) =>
+      val result = for {
+        v <- tainted
+        i <- safeIncrement
+      } yield v + i
+      println(s"Sanitised computation result: ${result.open}")

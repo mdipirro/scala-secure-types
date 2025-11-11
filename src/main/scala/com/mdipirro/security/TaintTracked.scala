@@ -18,39 +18,39 @@ type TaintPropagation[P0 <: TaintLevel, P1 <: TaintLevel] <: TaintLevel = (P0, P
   case (TaintLevel.Pure.type, TaintLevel.Pure.type) => TaintLevel.Pure.type
 
 
-class TaintTracker[P <: TaintLevel, +A] private(computeValue: () => A):
-  import TaintTracker.Sanitised
+class TaintTracked[P <: TaintLevel, +A] private(computeValue: () => A):
+  import TaintTracked.Sanitised
 
   private lazy val value = computeValue()
 
   def open(using CanOpen[P]): A = value
 
-  def map[B](f: A => B): TaintTracker[P, B] = TaintTracker(f(value))
+  def map[B](f: A => B): TaintTracked[P, B] = TaintTracked(f(value))
 
-  def flatMap[P1 <: TaintLevel, B](f: A => TaintTracker[P1, B]): TaintTracker[TaintPropagation[P, P1], B] =
+  def flatMap[P1 <: TaintLevel, B](f: A => TaintTracked[P1, B]): TaintTracked[TaintPropagation[P, P1], B] =
     val result = f(value)
-    TaintTracker(result.value)
+    TaintTracked(result.value)
 
   def foreach(f: A => Unit): Unit = f(value)
 
   def sanitise[B, E](s: A => Either[E, B]): Sanitised[B, E] =
     val result = s(value)
-    result.map(TaintTracker.apply)
+    result.map(TaintTracked.apply)
 
-object TaintTracker:
-  type Sanitised[A, E] = Either[E, TaintTracker[TaintLevel.Sanitised.type, A]]
+object TaintTracked:
+  type Sanitised[A, E] = Either[E, TaintTracked[TaintLevel.Sanitised.type, A]]
 
-  def apply[P <: TaintLevel, A](a: => A): TaintTracker[P, A] = new TaintTracker(() => a)
+  def apply[P <: TaintLevel, A](a: => A): TaintTracked[P, A] = new TaintTracked(() => a)
 
 @main def sanitise(): Unit =
   print("Enter a value: ")
 
-  val tainted = TaintTracker[TaintLevel.Tainted.type, String](scala.io.StdIn.readLine())
+  val tainted = TaintTracked[TaintLevel.Tainted.type, String](scala.io.StdIn.readLine())
   val sanitised = tainted sanitise { str =>
     str.toIntOption.toRight(s"$str is not a number")
   }
 
-  val safeIncrement = TaintTracker[TaintLevel.Pure.type, Int](5)
+  val safeIncrement = TaintTracked[TaintLevel.Pure.type, Int](5)
 
   sanitised match
     case Left(error) => println(s"Sanitisation failed: $error")

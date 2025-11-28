@@ -33,33 +33,14 @@ class TaintTracked[P <: TaintLevel, +A] private(computeValue: () => A):
 
   def foreach(f: A => Unit): Unit = f(value)
 
-  def sanitise[B, E](s: A => Either[E, B]): Sanitised[B, E] =
+  def sanitise[E, B](s: A => Either[E, B]): Sanitised[E, B] =
     val result = s(value)
     result.map(r => new TaintTracked(() => r))
 
 object TaintTracked:
-  type Sanitised[A, E] = Either[E, TaintTracked[TaintLevel.Sanitised.type, A]]
+  type Sanitised[E, A] = Either[E, TaintTracked[TaintLevel.Sanitised.type, A]]
 
   def apply[A](a: => A): TaintTracked[TaintLevel.Tainted.type, A] = new TaintTracked(() => a)
 
   // Creates a Pure TaintTracked value explicitly
   def unsafe[A](a: => A): TaintTracked[TaintLevel.Pure.type, A] = new TaintTracked(() => a)
-
-@main def sanitise(): Unit =
-  print("Enter a value: ")
-
-  val tainted = TaintTracked(scala.io.StdIn.readLine())
-  val sanitised = tainted sanitise { str =>
-    str.toIntOption.toRight(s"$str is not a number")
-  }
-
-  val safeIncrement = TaintTracked.unsafe(5)
-
-  sanitised match
-    case Left(error) => println(s"Sanitisation failed: $error")
-    case Right(safeValue) =>
-      val result = for {
-        v <- safeValue
-        i <- safeIncrement
-      } yield v + i
-      println(s"Sanitised computation result: ${result.open}")
